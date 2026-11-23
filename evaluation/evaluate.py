@@ -20,7 +20,7 @@ from app.config import (
 )
 
 # "judge" (LLM-as-judge) or "embedding" (cosine similarity of embeddings)
-SIMILARITY_METHOD = os.getenv("SIMILARITY_METHOD", "embedding")
+SIMILARITY_METHOD = os.getenv("SIMILARITY_METHOD", "judge")
 JUDGE_MODEL = os.getenv("JUDGE_MODEL", LLM_MODEL)
 
 JUDGE_PROMPT = """You are grading a customer service answer against a reference answer.
@@ -75,13 +75,13 @@ def get_embedding(
     Returns:
         Numpy array containing the embedding vector
     """
-    url = f"{base_url}/api/embeddings"
-    payload = {"model": model, "prompt": text}
+    url = f"{base_url}/api/embed"
+    payload = {"model": model, "input": [text]}
 
     response = httpx.post(url, json=payload, timeout=30.0)
     response.raise_for_status()
 
-    return np.array(response.json()["embedding"], dtype=float)
+    return np.array(response.json()["embeddings"][0], dtype=float)
 
 
 def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
