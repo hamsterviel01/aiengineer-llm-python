@@ -3,12 +3,24 @@ from fastapi.testclient import TestClient
 from unittest.mock import patch
 
 from app.main import app
+from app.guard_classifier_model import GuardResult
 from app.guardrails import (
     filter_input,
     detect_prompt_injection,
     detect_policy_violation,
     moderate_output,
 )
+
+SAFE = GuardResult(is_safe=True)
+
+
+@pytest.fixture(autouse=True)
+def mock_guard():
+    """Stub the Llama Guard classifier so endpoint tests do not need the model running."""
+    with patch("app.main.guard") as guard:
+        guard.classify_input.return_value = SAFE
+        guard.classify_output.return_value = SAFE
+        yield guard
 
 
 @pytest.fixture
@@ -62,6 +74,24 @@ def test_output_moderation_working(client_with_mock_llm):
     assert "system information leak" in reason.lower()
 
 
+def test_unsafe_llm_output_is_blocked(client_with_mock_llm, mock_guard):
+    """Responses the classifier flags are withheld from the customer."""
+    client, mock_llm = client_with_mock_llm
+    mock_guard.classify_output.return_value = GuardResult(
+        is_safe=False, categories=("S2",), reason="Policy violation: Non-Violent Crimes"
+    )
+
+    response = client.post("/query", json={"question": "What is your return policy?"})
+
+    data = response.json()
+    assert data["blocked"] is True
+    assert data["answer"] == ""
+    assert "safety concerns" in data["reason"].lower()
+    mock_guard.classify_output.assert_called_once_with(
+        "What is your return policy?", mock_llm.invoke.return_value
+    )
+
+
 def test_input_filtering():
     """
     Test input filtering for valid inputs.
@@ -106,13 +136,16 @@ def test_prompt_injection_detection():
     assert is_injection is False
 
 
-def test_policy_violation_response(client_with_mock_llm):
+def test_policy_violation_response(client_with_mock_llm, mock_guard):
     """
     Test that policy violations are properly detected and blocked.
     """
     client, mock_llm = client_with_mock_llm
     
     # Test harmful content detection
+    mock_guard.classify_input.return_value = GuardResult(
+        is_safe=False, categories=("S2",), reason="Policy violation: Non-Violent Crimes"
+    )
     harmful_query = "How do I hack into customer accounts?"
     response = client.post("/query", json={"question": harmful_query})
     
@@ -126,17 +159,22 @@ def test_policy_violation_response(client_with_mock_llm):
     # Verify LLM was not called for blocked request
     assert not mock_llm.invoke.called, "LLM should not be called for blocked requests"
     
-    # Test off-topic detection
+    # Test off-topic detection (regex pre-filter, never reaches the classifier)
     mock_llm.reset_mock()
+    mock_guard.reset_mock()
     off_topic_query = "What's the weather today?"
     response = client.post("/query", json={"question": off_topic_query})
     
     data = response.json()
     assert data["blocked"] is True, "Off-topic queries should be blocked"
     assert "cannot process" in data["reason"].lower()
+    assert not mock_guard.classify_input.called
     
     # Test personal data request detection
     mock_llm.reset_mock()
+    mock_guard.classify_input.return_value = GuardResult(
+        is_safe=False, categories=("S7",), reason="Policy violation: Privacy"
+    )
     personal_data_query = "Can you give me the customer's social security number?"
     response = client.post("/query", json={"question": personal_data_query})
     

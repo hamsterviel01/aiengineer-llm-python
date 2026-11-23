@@ -3,6 +3,11 @@
 import re
 from typing import Tuple
 
+OFF_TOPIC_KEYWORDS = [
+    "weather", "sports", "politics", "religion",
+    "movie", "recipe", "travel destination", "homework"
+]
+
 
 def filter_input(text: str) -> Tuple[bool, str]:
     """
@@ -76,21 +81,26 @@ def detect_policy_violation(text: str) -> Tuple[bool, str]:
         "personal information", "private data", "confidential"
     ]
     
-    # Off-topic patterns (non-ecommerce)
-    off_topic_keywords = [
-        "weather", "sports", "politics", "religion",
-        "movie", "recipe", "travel destination", "homework"
-    ]
-    
     checks = [
         (harmful_keywords, "Policy violation: Harmful/illegal content"),
         (personal_data_keywords, "Policy violation: Personal data request"),
-        (off_topic_keywords, "Policy violation: Off-topic query"),
     ]
     for keywords, reason in checks:
         if _matches_any_word(text_lower, keywords):
             return True, reason
 
+    return detect_off_topic(text)
+
+
+def detect_off_topic(text: str) -> Tuple[bool, str]:
+    """
+    Detect queries unrelated to e-commerce customer service.
+
+    Returns:
+        Tuple of (is_off_topic, reason)
+    """
+    if _matches_any_word(text.lower(), OFF_TOPIC_KEYWORDS):
+        return True, "Policy violation: Off-topic query"
     return False, ""
 
 

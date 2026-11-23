@@ -7,6 +7,11 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "smollm2:135m")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
+# Guard classifier settings (Llama Guard served by its own Ollama instance)
+GUARD_BASE_URL = os.getenv("GUARD_BASE_URL", "http://localhost:11435")
+GUARD_MODEL = os.getenv("GUARD_MODEL", "llama-guard3:1b")
+GUARD_TIMEOUT = float(os.getenv("GUARD_TIMEOUT", "30"))
+
 # Application settings
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
 APP_PORT = int(os.getenv("APP_PORT", "8000"))

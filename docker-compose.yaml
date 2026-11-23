@@ -39,6 +39,39 @@ services:
       - app_network
     restart: "no"
 
+  # Llama Guard safety classifier, served by a dedicated Ollama instance
+  llama-guard:
+    image: ollama/ollama:latest
+    container_name: llama-guard
+    ports:
+      - "11435:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1  # keep the guard in memory so every request skips the model load
+    volumes:
+      - guard_data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        trap 'kill $$pid' TERM INT
+        until ollama list > /dev/null 2>&1; do sleep 1; done
+        echo "Pulling llama-guard3:1b model..."
+        ollama pull llama-guard3:1b
+        echo "Warming up llama-guard3:1b..."
+        ollama run llama-guard3:1b "hello" > /dev/null
+        echo "Guard model ready!"
+        wait $$pid
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show llama-guard3:1b > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - app_network
+    restart: unless-stopped
+
   # Phoenix observability platform
   phoenix:
     image: arizephoenix/phoenix:latest
@@ -67,6 +100,8 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - LLM_MODEL=smollm2:135m
       - EMBEDDING_MODEL=nomic-embed-text
+      - GUARD_BASE_URL=http://llama-guard:11434
+      - GUARD_MODEL=llama-guard3:1b
       - PHOENIX_ENDPOINT=http://phoenix:6006
       - PHOENIX_ENABLED=true
     depends_on:
@@ -74,6 +109,8 @@ services:
         condition: service_healthy
       ollama-init:
         condition: service_completed_successfully
+      llama-guard:
+        condition: service_healthy
       phoenix:
         condition: service_started
     networks:
@@ -83,6 +120,8 @@ services:
 
 volumes:
   ollama_data:
+    driver: local
+  guard_data:
     driver: local
   phoenix_data:
     driver: local

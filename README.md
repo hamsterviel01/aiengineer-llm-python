@@ -9,6 +9,8 @@ The application provides a customer service chatbot powered by a locally-hosted 
 - Policy-violating content (harmful/illegal, personal data requests, off-topic queries)
 - Unsafe outputs
 
+Safety classification of both customer messages and LLM responses is done by [Llama Guard 3 1B](https://ollama.com/library/llama-guard3) (`app/guard_classifier_model.py`), served by the `llama-guard` docker-compose service on port `11435`. Cheap regex checks for input length, prompt injection, off-topic queries and sensitive output formats (`app/guardrails.py`) run in front of it. If the classifier is unreachable, requests are blocked.
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -80,6 +82,9 @@ Environment variables (see `app/config.py`):
 - `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://localhost:11434`)
 - `LLM_MODEL`: LLM model name (default: `smollm2:135m`)
 - `EMBEDDING_MODEL`: Embedding model name (default: `nomic-embed-text`)
+- `GUARD_BASE_URL`: Ollama endpoint serving the guard model (default: `http://localhost:11435`)
+- `GUARD_MODEL`: Guard classifier model name (default: `llama-guard3:1b`)
+- `GUARD_TIMEOUT`: Guard classifier request timeout in seconds (default: `30`)
 - `APP_HOST`: Application host (default: `0.0.0.0`)
 - `APP_PORT`: Application port (default: `8000`)
 - `PHOENIX_ENDPOINT`: Phoenix observability endpoint (default: `http://localhost:6006`)

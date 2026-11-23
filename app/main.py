@@ -6,10 +6,11 @@ from langchain_ollama import OllamaLLM
 import logging
 
 from app.config import OLLAMA_BASE_URL, LLM_MODEL, SYSTEM_PROMPT, PHOENIX_ENDPOINT, PHOENIX_ENABLED
+from app.guard_classifier_model import GuardClassifier
 from app.guardrails import (
     filter_input,
     detect_prompt_injection,
-    detect_policy_violation,
+    detect_off_topic,
     moderate_output,
 )
 
@@ -60,6 +61,8 @@ llm = OllamaLLM(
     temperature=0.7,
     max_tokens=200,
 )
+
+guard = GuardClassifier()
 
 
 class QueryRequest(BaseModel):
@@ -153,28 +156,50 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             reason="I cannot process this request. Reason: Prompt injection attempt detected.",
         )
     
-    # Step 3: Policy violation detection
+    # Step 3: Off-topic detection
     if PHOENIX_ENABLED and tracer and parent_span:
-        with tracer.start_as_current_span("policy_violation_detection") as span:
-            is_violation, violation_reason = detect_policy_violation(filtered_question)
-            span.set_attribute("guardrail.passed", not is_violation)
-            if is_violation:
-                span.set_attribute("guardrail.reason", violation_reason)
+        with tracer.start_as_current_span("off_topic_detection") as span:
+            is_off_topic, off_topic_reason = detect_off_topic(filtered_question)
+            span.set_attribute("guardrail.passed", not is_off_topic)
+            if is_off_topic:
+                span.set_attribute("guardrail.reason", off_topic_reason)
     else:
-        is_violation, violation_reason = detect_policy_violation(filtered_question)
-        
-    if is_violation:
-        logger.warning(f"Policy violation detected: {violation_reason}")
+        is_off_topic, off_topic_reason = detect_off_topic(filtered_question)
+
+    if is_off_topic:
+        logger.warning(f"Off-topic query detected: {off_topic_reason}")
+        if parent_span:
+            parent_span.set_attribute("output.blocked", True)
+            parent_span.set_attribute("output.block_reason", "off_topic")
+        return QueryResponse(
+            answer="",
+            blocked=True,
+            reason=f"I cannot process this request. Reason: {off_topic_reason}",
+        )
+
+    # Step 4: Input safety classification (Llama Guard)
+    if PHOENIX_ENABLED and tracer and parent_span:
+        with tracer.start_as_current_span("input_safety_classification") as span:
+            input_verdict = guard.classify_input(filtered_question)
+            span.set_attribute("guardrail.passed", input_verdict.is_safe)
+            if not input_verdict.is_safe:
+                span.set_attribute("guardrail.reason", input_verdict.reason)
+                span.set_attribute("guardrail.categories", list(input_verdict.categories))
+    else:
+        input_verdict = guard.classify_input(filtered_question)
+
+    if not input_verdict.is_safe:
+        logger.warning(f"Input safety classifier blocked: {input_verdict.reason}")
         if parent_span:
             parent_span.set_attribute("output.blocked", True)
             parent_span.set_attribute("output.block_reason", "policy_violation")
         return QueryResponse(
             answer="",
             blocked=True,
-            reason=f"I cannot process this request. Reason: {violation_reason}",
+            reason=f"I cannot process this request. Reason: {input_verdict.reason}",
         )
-    
-    # Step 4: Call LLM
+
+    # Step 5: Call LLM
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nCustomer: {filtered_question}\n\nAssistant:"
         response = llm.invoke(full_prompt)
@@ -189,7 +214,7 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             detail="Failed to generate response. Please try again later.",
         )
     
-    # Step 5: Output moderation
+    # Step 6: Output moderation
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("output_moderation") as span:
             is_safe, safety_reason = moderate_output(response)
@@ -209,7 +234,29 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             blocked=True,
             reason="I apologize, but I cannot provide this response due to safety concerns.",
         )
-    
+
+    # Step 7: Output safety classification (Llama Guard)
+    if PHOENIX_ENABLED and tracer and parent_span:
+        with tracer.start_as_current_span("output_safety_classification") as span:
+            output_verdict = guard.classify_output(filtered_question, response)
+            span.set_attribute("guardrail.passed", output_verdict.is_safe)
+            if not output_verdict.is_safe:
+                span.set_attribute("guardrail.reason", output_verdict.reason)
+                span.set_attribute("guardrail.categories", list(output_verdict.categories))
+    else:
+        output_verdict = guard.classify_output(filtered_question, response)
+
+    if not output_verdict.is_safe:
+        logger.warning(f"Output safety classifier blocked: {output_verdict.reason}")
+        if parent_span:
+            parent_span.set_attribute("output.blocked", True)
+            parent_span.set_attribute("output.block_reason", "output_safety_classification")
+        return QueryResponse(
+            answer="",
+            blocked=True,
+            reason="I apologize, but I cannot provide this response due to safety concerns.",
+        )
+
     # Return successful response
     if parent_span:
         parent_span.set_attribute("output.blocked", False)

@@ -52,7 +52,7 @@ echo ""
 # Stop and remove any existing containers
 echo "Cleaning up existing containers..."
 docker-compose down 2>/dev/null || true
-docker rm -f ollama ollama-init customer-service-app 2>/dev/null || true
+docker rm -f ollama ollama-init llama-guard customer-service-app 2>/dev/null || true
 print_success "Cleanup complete"
 echo ""
 
@@ -106,6 +106,28 @@ if docker exec ollama ollama list | grep -q "smollm2" && docker exec ollama olla
 else
     print_warning "Models may not be properly installed"
     docker exec ollama ollama list
+fi
+echo ""
+
+# Start the Llama Guard safety classifier (pulls llama-guard3:1b on first start)
+echo "Starting Llama Guard service (pulls llama-guard3:1b, ~1.6 GB, on first start)..."
+docker-compose up -d llama-guard
+TIMEOUT=600
+ELAPSED=0
+while [ $ELAPSED -lt $TIMEOUT ]; do
+    if docker inspect --format='{{.State.Health.Status}}' llama-guard 2>/dev/null | grep -q "healthy"; then
+        print_success "Llama Guard is healthy"
+        break
+    fi
+    echo "  Waiting... ($ELAPSED/$TIMEOUT seconds)"
+    sleep 10
+    ELAPSED=$((ELAPSED + 10))
+done
+
+if [ $ELAPSED -ge $TIMEOUT ]; then
+    print_error "Llama Guard failed to become healthy within $TIMEOUT seconds"
+    echo "  Check logs with: docker logs llama-guard"
+    exit 1
 fi
 echo ""
 
