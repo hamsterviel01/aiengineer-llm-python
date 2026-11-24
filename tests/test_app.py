@@ -1,4 +1,4 @@
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,9 +22,9 @@ def client():
 def client_with_mock_llm():
     """Create a test client with mocked LLM responses."""
     with patch("app.main.llm") as mock_llm:
-        mock_llm.invoke.return_value = (
+        mock_llm.ainvoke = AsyncMock(return_value=(
             "Thank you for your question. I'd be happy to help with your order."
-        )
+        ))
         yield TestClient(app), mock_llm
 
 
@@ -46,7 +46,7 @@ def test_safe_query_valid_input(client_with_mock_llm):
     data = response.json()
     assert data["blocked"] is False
     assert len(data["answer"]) > 0
-    assert mock_llm.invoke.called
+    assert mock_llm.ainvoke.called
 
 
 def test_output_moderation_working(client_with_mock_llm):
@@ -124,7 +124,7 @@ def test_policy_violation_response(client_with_mock_llm):
     assert len(data["answer"]) == 0
 
     # Verify LLM was not called for blocked request
-    assert not mock_llm.invoke.called, "LLM should not be called for blocked requests"
+    assert not mock_llm.ainvoke.called, "LLM should not be called for blocked requests"
 
     # Test off-topic detection
     mock_llm.reset_mock()
