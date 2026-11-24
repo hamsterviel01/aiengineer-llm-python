@@ -64,17 +64,33 @@ After fixing the bugs, discuss and optionally implement:
 1. **Defense-in-depth strategies**:
    - How would you improve the pre-filtering?
    - What additional output moderation would you add?
+   # TODO - learn:
+     SAFE, Policy violation, injection
+     Need to check 
+     - PII leakage, 
+     - hallucination (add lightweight model at output to check hallucination, cannot use embedding)
+     Add human in the loop.
    - How would you handle edge cases?
+   # TODO - use one method to check other method edge cases. Ollama edge case is hallucination while khoa embedding is 
 
 2. **Monitoring and logging**:
    - What metrics would you track?
+   # TODO - FP, FN, precision, recall, etc.
    - How would you detect new attack patterns?
+   # TODO - use LLM to generate new attack conversations - slurge expensive. 
+   # And human in the loops
+   # We can also use ensembles of methodst to discover each other edge cases.
    - What alerts would you set up?
+   # TODO Ambiguous cases --> enable human in the loop
 
 3. **Trade-offs**:
-   - False positives vs false negatives
-   - Latency vs thoroughness
-   - Explainability vs accuracy
+   - False positives vs false negatives - Adjust thresholds
+   - Latency vs thoroughness - can even run both method in parralel.
+   - Explainability (why we reject) vs accuracy ()
+   # TODO - rule based vs LLM-based
+
+   # TODO - very important - confusion metrics. VERY IMPORTANT.
+
 
 ## Configuration
 
