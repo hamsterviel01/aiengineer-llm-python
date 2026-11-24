@@ -1,0 +1,15 @@
+# GPU override for Linux hosts with an NVIDIA GPU and the NVIDIA Container Toolkit installed.
+# Docker on macOS cannot access the Apple GPU, so do not use this file on a Mac.
+#
+#   docker compose -f docker-compose.yaml -f docker-compose.gpu.yaml up -d
+#
+# Ref: https://docs.docker.com/compose/how-tos/gpu-support/
+services:
+  ollama:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
