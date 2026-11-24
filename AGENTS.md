@@ -41,6 +41,10 @@ for change in changes:
 - Pass 2: re-read the pass-1 diff (`git diff`) and list what is weak, missing or untested.
 
 ### 2. Plan
+- **Propose options and let the user pick.** Before implementing, present 2–4 distinct approaches,
+ each with a one-line summary and its main trade-offs (complexity, risk, scope). Recommend one, then
+ **stop and wait for the user's choice** — don't start implementing until they pick. Skip this only
+ for trivial changes with one obvious solution.
 - Write a short numbered plan: files to change, functions to add/modify, tests to add.
 - Note risks and how you will verify each step.
 - Keep the change small and focused; split large work into separate changes, each with its own 2-pass loop.
