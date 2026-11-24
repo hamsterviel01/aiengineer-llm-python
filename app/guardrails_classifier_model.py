@@ -9,6 +9,7 @@ References:
 
 import logging
 import re
+from functools import lru_cache
 from typing import Any
 
 import httpx
@@ -80,6 +81,66 @@ CONTROL_SEQUENCES = re.compile(r"<\|[a-z_]+\|>|<(?:BEGIN|END) [A-Z ]+>")
 
 client = httpx.Client(base_url=GUARD_BASE_URL, timeout=GUARD_TIMEOUT)
 
+PROMPT_INJECTION_CODE = "S15"
+UNAVAILABLE = GuardVerdict(False, "Safety check unavailable", [])
+
+
+def filter_input(text: str) -> tuple[bool, str]:
+    """
+    Filter and sanitize user input (length checks, no model call).
+
+    Returns:
+        Tuple of (is_valid, filtered_text)
+    """
+    if not text or len(text.strip()) == 0:
+        return False, "Input cannot be empty"
+
+    if len(text) > 1000:
+        return False, "Input is too long (max 1000 characters)"
+
+    return True, text.strip()
+
+
+def detect_prompt_injection(text: str) -> tuple[bool, str]:
+    """
+    Detect prompt injection via Llama Guard category S15; fails closed if the model is down.
+
+    Returns:
+        Tuple of (is_injection_detected, reason)
+    """
+    return _detect_category(text, PROMPT_INJECTION_CODE, "Prompt injection attempt detected")
+
+
+def detect_policy_violation(text: str) -> tuple[bool, str]:
+    """
+    Detect policy-violating content (any Llama Guard category, including S16 Off-Topic).
+
+    Returns:
+        Tuple of (is_violation_detected, reason)
+    """
+    verdict = classify_input(text)
+    return not verdict.is_safe, verdict.reason
+
+
+def moderate_output(text: str) -> tuple[bool, str]:
+    """
+    Always passes: the LLM response is classified by classify_output, which also sees the
+    customer message Llama Guard needs for context.
+
+    Returns:
+        Tuple of (is_safe, reason_if_unsafe)
+    """
+    return True, ""
+
+
+def _detect_category(text: str, code: str, reason: str) -> tuple[bool, str]:
+    verdict = classify_input(text)
+    if verdict == UNAVAILABLE:
+        return True, verdict.reason
+    if code in verdict.categories:
+        return True, reason
+    return False, ""
+
 
 def classify_input(user_message: str) -> GuardVerdict:
     """
@@ -105,19 +166,30 @@ def _classify(role: str, conversation: str) -> GuardVerdict:
     prompt = PROMPT_TEMPLATE.format(
         role=role, categories=CATEGORIES, conversation=CONTROL_SEQUENCES.sub("", conversation)
     )
-    # raw=True sends our prompt as-is instead of Ollama's template:
-    # https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion
     try:
-        response = client.post(
-            "/api/generate",
-            json={"model": GUARD_MODEL, "prompt": prompt, "raw": True, "stream": False},
-        )
-        response.raise_for_status()
+        output = _generate(prompt)
     except httpx.HTTPError as e:
         logger.error(f"Guard classifier unavailable: {e}")
-        return GuardVerdict(False, "Safety check unavailable", [])
+        return UNAVAILABLE
 
-    return parse_verdict(response.json()["response"])
+    return parse_verdict(output)
+
+
+# The injection and input safety steps classify the same message, so cache the raw
+# model output to make one call per message. Exceptions are not cached, so outages are retried.
+# Key: the full formatted prompt (role + categories + sanitized conversation).
+# Value: Llama Guard's raw text output, e.g. "safe" or "unsafe\nS15,S16".
+# Ref: https://docs.python.org/3/library/functools.html#functools.lru_cache
+@lru_cache(maxsize=128)
+def _generate(prompt: str) -> str:
+    # raw=True sends our prompt as-is instead of Ollama's template:
+    # https://github.com/ollama/ollama/blob/main/docs/api.md#generate-a-completion
+    response = client.post(
+        "/api/generate",
+        json={"model": GUARD_MODEL, "prompt": prompt, "raw": True, "stream": False},
+    )
+    response.raise_for_status()
+    return str(response.json()["response"])
 
 
 def parse_verdict(output: str) -> GuardVerdict:

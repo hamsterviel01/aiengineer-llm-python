@@ -19,8 +19,11 @@ from app.guardrails import (
 
 @pytest.fixture(autouse=True)
 def mock_guard():
-    """Stub the Llama Guard classifier so endpoint tests do not need the model running."""
+    """Stub the safety guard: keyword pre-checks, stubbed classification, no model needed."""
     with patch("app.main.guard") as guard:
+        guard.filter_input.side_effect = guardrails.filter_input
+        guard.detect_prompt_injection.side_effect = guardrails.detect_prompt_injection
+        guard.moderate_output.side_effect = guardrails.moderate_output
         guard.classify_input.return_value = GuardVerdict(True, "", [])
         guard.classify_output.return_value = GuardVerdict(True, "", [])
         yield guard
@@ -197,19 +200,20 @@ def test_policy_violation_response(client_with_mock_llm, mock_guard):
     # Verify LLM was not called for blocked request
     assert not mock_llm.invoke.called, "LLM should not be called for blocked requests"
     
-    # Test off-topic detection (regex pre-filter, never reaches the classifier)
+    # Test off-topic detection (part of the keyword guard's policy violation check)
     mock_llm.reset_mock()
-    mock_guard.reset_mock()
+    mock_guard.classify_input.side_effect = guardrails.classify_input
     off_topic_query = "What's the weather today?"
     response = client.post("/query", json={"question": off_topic_query})
     
     data = response.json()
     assert data["blocked"] is True, "Off-topic queries should be blocked"
-    assert "cannot process" in data["reason"].lower()
-    assert not mock_guard.classify_input.called
+    assert "off-topic" in data["reason"].lower()
+    assert not mock_llm.invoke.called
     
     # Test personal data request detection
     mock_llm.reset_mock()
+    mock_guard.classify_input.side_effect = None
     mock_guard.classify_input.return_value = GuardVerdict(False, "Policy violation: Privacy", ["S7"])
     personal_data_query = "Can you give me the customer's social security number?"
     response = client.post("/query", json={"question": personal_data_query})
@@ -231,6 +235,11 @@ def test_detect_policy_violation_unit():
     assert is_violation is True, "Harmful content should be detected"
     assert "harmful" in reason.lower() or "policy" in reason.lower()
     
+    # Test off-topic content
+    is_violation, reason = detect_policy_violation("What's the weather today?")
+    assert is_violation is True, "Off-topic queries should be detected"
+    assert reason == "Policy violation: Off-topic query"
+
     # Test safe content
     is_violation, reason = detect_policy_violation("Where is my order?")
     assert is_violation is False, "Safe queries should not be flagged as violations"

@@ -9,7 +9,10 @@ The application provides a customer service chatbot powered by a locally-hosted 
 - Policy-violating content (harmful/illegal, personal data requests, off-topic queries)
 - Unsafe outputs
 
-By default (`SAFETY_GUARD=llama_guard`), safety classification of both customer messages and LLM responses is done by [Llama Guard 3 1B](https://ollama.com/library/llama-guard3) (`app/guardrails_classifier_model.py`), served by the `llama-guard` docker-compose service on port `11435`. Cheap regex checks for input length, prompt injection, off-topic queries and sensitive output formats (`app/guardrails.py`) run in front of it. If the classifier is unreachable, requests are blocked.
+`SAFETY_GUARD` selects one guard module that runs every guardrail step (input filtering, prompt injection, input safety including off-topic, output moderation, output safety). Both modules expose the same functions and differ only in method:
+
+- `llama_guard` (default): [Llama Guard 3 1B](https://ollama.com/library/llama-guard3) (`app/guardrails_classifier_model.py`), served by the `llama-guard` docker-compose service on port `11435`. Prompt injection and off-topic map to custom categories S15/S16; each message is classified once and reused across input steps. If the classifier is unreachable, requests are blocked.
+- `keyword`: regex and keyword lists (`app/guardrails.py`), no model needed.
 
 ## Prerequisites
 

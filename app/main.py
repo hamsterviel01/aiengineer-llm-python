@@ -15,12 +15,6 @@ from app.config import (
     SYSTEM_PROMPT,
 )
 from app.guardrails_config import guard
-from app.guardrails import (
-    detect_off_topic,
-    detect_prompt_injection,
-    filter_input,
-    moderate_output,
-)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -121,12 +115,12 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
     # Step 1: Input filtering
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("input_filtering") as span:
-            is_valid, filtered_or_reason = filter_input(question)
+            is_valid, filtered_or_reason = guard.filter_input(question)
             span.set_attribute("guardrail.passed", is_valid)
             if not is_valid:
                 span.set_attribute("guardrail.reason", filtered_or_reason)
     else:
-        is_valid, filtered_or_reason = filter_input(question)
+        is_valid, filtered_or_reason = guard.filter_input(question)
 
     if not is_valid:
         logger.warning(f"Input filtering blocked: {filtered_or_reason}")
@@ -144,12 +138,12 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
     # Step 2: Prompt injection detection
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("prompt_injection_detection") as span:
-            is_injection, injection_reason = detect_prompt_injection(filtered_question)
+            is_injection, injection_reason = guard.detect_prompt_injection(filtered_question)
             span.set_attribute("guardrail.passed", not is_injection)
             if is_injection:
                 span.set_attribute("guardrail.reason", injection_reason)
     else:
-        is_injection, injection_reason = detect_prompt_injection(filtered_question)
+        is_injection, injection_reason = guard.detect_prompt_injection(filtered_question)
 
     if is_injection:
         logger.warning(f"Prompt injection detected: {injection_reason}")
@@ -159,31 +153,10 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
         return QueryResponse(
             answer="",
             blocked=True,
-            reason="I cannot process this request. Reason: Prompt injection attempt detected.",
+            reason=f"I cannot process this request. Reason: {injection_reason}.",
         )
 
-    # Step 3: Off-topic detection
-    if PHOENIX_ENABLED and tracer and parent_span:
-        with tracer.start_as_current_span("off_topic_detection") as span:
-            is_off_topic, off_topic_reason = detect_off_topic(filtered_question)
-            span.set_attribute("guardrail.passed", not is_off_topic)
-            if is_off_topic:
-                span.set_attribute("guardrail.reason", off_topic_reason)
-    else:
-        is_off_topic, off_topic_reason = detect_off_topic(filtered_question)
-
-    if is_off_topic:
-        logger.warning(f"Off-topic query detected: {off_topic_reason}")
-        if parent_span:
-            parent_span.set_attribute("output.blocked", True)
-            parent_span.set_attribute("output.block_reason", "off_topic")
-        return QueryResponse(
-            answer="",
-            blocked=True,
-            reason=f"I cannot process this request. Reason: {off_topic_reason}",
-        )
-
-    # Step 4: Input safety classification (SAFETY_GUARD)
+    # Step 3: Input safety classification (policy violations, including off-topic queries)
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("input_safety_classification") as span:
             input_verdict = guard.classify_input(filtered_question)
@@ -205,7 +178,7 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             reason=f"I cannot process this request. Reason: {input_verdict.reason}",
         )
 
-    # Step 5: Call LLM
+    # Step 4: Call LLM
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nCustomer: {filtered_question}\n\nAssistant:"
         response = llm.invoke(full_prompt)
@@ -220,16 +193,15 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             detail="Failed to generate response. Please try again later.",
         )
 
-    # Step 6: Output moderation
-    # FIXME - guardrails_classifier_model.py doesn't do output moderation, only classification right now.
+    # Step 5: Output moderation
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("output_moderation") as span:
-            is_safe, safety_reason = moderate_output(response)
+            is_safe, safety_reason = guard.moderate_output(response)
             span.set_attribute("guardrail.passed", is_safe)
             if not is_safe:
                 span.set_attribute("guardrail.reason", safety_reason)
     else:
-        is_safe, safety_reason = moderate_output(response)
+        is_safe, safety_reason = guard.moderate_output(response)
 
     if not is_safe:
         logger.warning(f"Output moderation blocked: {safety_reason}")
@@ -242,7 +214,7 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             reason="I apologize, but I cannot provide this response due to safety concerns.",
         )
 
-    # Step 7: Output safety classification (SAFETY_GUARD)
+    # Step 6: Output safety classification
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("output_safety_classification") as span:
             output_verdict = guard.classify_output(filtered_question, response)
