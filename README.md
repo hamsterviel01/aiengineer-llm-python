@@ -37,6 +37,19 @@ Run the automated setup script to configure everything in one go:
 
 **Note**: Initial model downloads may take 3-7 minutes depending on your connection.
 
+### GPU acceleration (Linux + NVIDIA only)
+
+By default the Ollama services run on CPU. On a Linux host with an NVIDIA GPU and the
+[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/install-guide.html)
+installed, layer the GPU override on top of the base compose file:
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.gpu.yaml up -d
+docker exec ollama ollama ps   # PROCESSOR column should show GPU after a request
+```
+
+Docker on macOS cannot use the Apple GPU; to use Metal, run Ollama natively on the host instead.
+
 ## Exercise Tasks
 
 ### Task 1: Fix Failing Tests (15 minutes)
