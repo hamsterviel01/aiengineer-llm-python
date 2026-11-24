@@ -82,6 +82,7 @@ services:
     environment:
       - PHOENIX_HOST=0.0.0.0
       - PHOENIX_PORT=6006
+      - PHOENIX_ENABLE_AUTH=false
     volumes:
       - phoenix_data:/phoenix
     networks:
@@ -100,6 +101,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - LLM_MODEL=smollm2:135m
       - EMBEDDING_MODEL=nomic-embed-text
+      - SAFETY_GUARD=${SAFETY_GUARD:-llama_guard}
       - GUARD_BASE_URL=http://llama-guard:11434
       - GUARD_MODEL=llama-guard3:1b
       - PHOENIX_ENDPOINT=http://phoenix:6006

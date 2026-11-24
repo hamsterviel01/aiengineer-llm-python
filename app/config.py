@@ -7,6 +7,9 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "smollm2:135m")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
 
+# Safety guard: "llama_guard" (app/guardrails_classifier_model.py) or "keyword" (app/guardrails.py)
+SAFETY_GUARD = os.getenv("SAFETY_GUARD", "llama_guard")
+
 # Guard classifier settings (Llama Guard served by its own Ollama instance)
 GUARD_BASE_URL = os.getenv("GUARD_BASE_URL", "http://localhost:11435")
 GUARD_MODEL = os.getenv("GUARD_MODEL", "llama-guard3:1b")

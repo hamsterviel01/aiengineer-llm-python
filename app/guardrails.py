@@ -3,6 +3,8 @@
 import re
 from typing import Tuple
 
+from app.guardrails_models import GuardVerdict
+
 OFF_TOPIC_KEYWORDS = [
     "weather", "sports", "politics", "religion",
     "movie", "recipe", "travel destination", "homework"
@@ -141,4 +143,28 @@ def moderate_output(text: str) -> Tuple[bool, str]:
             return False, "Output contains sensitive information"
     
     return True, ""
+
+
+def classify_input(user_message: str) -> GuardVerdict:
+    """
+    Keyword safety guard for customer messages (same interface as guardrails_classifier_model).
+
+    Returns:
+        GuardVerdict(is_safe, reason_if_unsafe, violated_category_codes); keyword checks have
+        no category codes, so the list is always empty.
+    """
+    is_violation, reason = detect_policy_violation(user_message)
+    return GuardVerdict(not is_violation, reason, [])
+
+
+def classify_output(user_message: str, agent_response: str) -> GuardVerdict:
+    """
+    Keyword safety guard for LLM responses (same interface as guardrails_classifier_model).
+
+    Always passes: keyword output checks already run in moderate_output.
+
+    Returns:
+        GuardVerdict(is_safe, reason_if_unsafe, violated_category_codes)
+    """
+    return GuardVerdict(True, "", [])
 
