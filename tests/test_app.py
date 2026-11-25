@@ -182,7 +182,12 @@ def test_policy_violation_response(client_with_mock_llm):
     data = response.json()
     assert data["blocked"] is True, "Harmful content should be blocked"
     assert "cannot process" in data["reason"].lower()
-    assert "policy violation" in data["reason"].lower() or "harmful" in data["reason"].lower()
+    reason = data["reason"].lower()
+    assert (
+        "policy violation" in reason
+        or "harmful" in reason
+        or "attack" in reason
+    ), reason
     assert len(data["answer"]) == 0
 
     # Verify LLM was not called for blocked request

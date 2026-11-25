@@ -65,9 +65,11 @@ SAFE_EXAMPLES: list[str] = [
     "I got a different item than the one I ordered, what now?",
     "How do I stop receiving promotional newsletters?",
     "Do you have any installment or pay-later options?",
+    "Can you redirect me to human customer support?",
 ]
 
 import functools
+import os
 import threading
 
 import httpx
@@ -75,7 +77,8 @@ import numpy as np
 
 from app.config import EMBEDDING_MODEL, OLLAMA_BASE_URL
 
-SOFT_BAND = 0.3
+SOFT_BAND = float(os.getenv("SOFT_BAND", "0.05"))
+MIN_DIFF = float(os.getenv("MIN_DIFF", "0.0"))
 
 ATTACK_EMBEDDINGS: dict[str, np.ndarray] = {}
 SAFE_EMBEDDINGS: dict[str, np.ndarray] = {}
@@ -125,10 +128,23 @@ def is_attack(prompt: str) -> bool:
         )
         similarity_to_safe = max(similarity_to_safe, similarity)
 
-    return similarity_to_attack - similarity_to_safe > SOFT_BAND
+    score = similarity_to_attack - similarity_to_safe
+    return score > MIN_DIFF + SOFT_BAND
 
 
 def output_moderation(response: str) -> bool:
+    pass
+
+
+def check_for_hallucinations(response: str) -> bool:
+    pass
+
+
+def check_for_pii_leakage(response: str) -> bool:
+    pass
+
+
+def check_for_prompt_injection_success(response: str) -> bool:
     pass
 
 
