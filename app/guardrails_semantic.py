@@ -70,7 +70,9 @@ SAFE_EXAMPLES: list[str] = [
 
 import functools
 import os
+import re
 import threading
+from typing import Tuple
 
 import httpx
 import numpy as np
@@ -132,20 +134,28 @@ def is_attack(prompt: str) -> bool:
     return score > MIN_DIFF + SOFT_BAND
 
 
-def output_moderation(response: str) -> bool:
+def output_moderation(response: str) -> Tuple[bool, str]:
+    if is_hallucination(response):
+        return False, "Output contains hallucination"
+    if is_pii_leakage(response):
+        return False, "Output contains PII leakage"
+    if is_prompt_injection_success(response):
+        return False, "Output contains prompt injection success"
+    return True, ""
+
+
+def is_hallucination(response: str) -> bool:
     pass
 
 
-def check_for_hallucinations(response: str) -> bool:
+def is_pii_leakage(response: str) -> bool:
     pass
 
 
-def check_for_pii_leakage(response: str) -> bool:
-    pass
-
-
-def check_for_prompt_injection_success(response: str) -> bool:
-    pass
+def is_prompt_injection_success(response: str) -> bool:
+    response = response.lower()
+    regex = r"<system>|<instructions>|<prompt>|<user>|<assistant>"
+    return re.search(regex, response) is not None
 
 
 def get_embedding(prompt: str) -> np.ndarray:

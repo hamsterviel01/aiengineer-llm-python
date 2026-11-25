@@ -9,6 +9,11 @@ from app.guardrails import (
     filter_input,
     moderate_output,
 )
+from app.guardrails_helpers import (
+    contains_credit_card,
+    contains_harmful_pattern,
+    contains_system_leak,
+)
 from app.main import app
 
 
@@ -122,6 +127,93 @@ def test_input_shipping_sentence_expect_allowed():
     is_safe, reason = moderate_output("Your order will arrive in 3-5 business days.")
     assert is_safe is True
     assert reason == ""
+
+
+def test_input_system_leak_phrase_expect_unsafe():
+    """A known leak phrase is unsafe, including when the casing differs."""
+    is_safe, reason = contains_system_leak("As per my system prompt, I should help you.")
+    assert is_safe is False
+    assert reason == "Output contains system information leak"
+
+    is_safe, reason = contains_system_leak("As an AI model, I can help.")
+    assert is_safe is False
+    assert reason == "Output contains system information leak"
+
+
+def test_input_ordinary_reply_expect_no_system_leak():
+    """Order text with none of the leak phrases is safe."""
+    is_safe, reason = contains_system_leak("Your order will arrive in 3-5 business days.")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_empty_output_expect_no_system_leak():
+    """An empty model reply has no leak phrase."""
+    is_safe, reason = contains_system_leak("")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_luhn_valid_card_helper_expect_unsafe():
+    """The card helper blocks a Luhn-valid 16-digit number."""
+    is_safe, reason = contains_credit_card("Card on file: 4111111111111111.")
+    assert is_safe is False
+    assert reason == "Output contains credit card number"
+
+
+def test_input_luhn_invalid_helper_expect_safe():
+    """The card helper allows a same-length number that fails Luhn."""
+    is_safe, reason = contains_credit_card("Reference 4111111111111112 is not a card.")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_empty_output_expect_no_credit_card():
+    """An empty model reply contains no card number."""
+    is_safe, reason = contains_credit_card("")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_password_assignment_expect_harmful():
+    """A secret label followed by ':' or '=' is sensitive output."""
+    is_safe, reason = contains_harmful_pattern("password: hunter2")
+    assert is_safe is False
+    assert reason == "Output contains sensitive information"
+
+    is_safe, reason = contains_harmful_pattern("SSN=123-45-6789")
+    assert is_safe is False
+    assert reason == "Output contains sensitive information"
+
+
+def test_input_ssn_pattern_expect_harmful():
+    """A ###-##-#### number is sensitive even without a label."""
+    is_safe, reason = contains_harmful_pattern("The number 123-45-6789 is on file.")
+    assert is_safe is False
+    assert reason == "Output contains sensitive information"
+
+
+def test_input_password_word_alone_expect_safe():
+    """The word password without ':' or '=' is not a harmful pattern."""
+    is_safe, reason = contains_harmful_pattern("Reset your password from the account page.")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_empty_output_expect_no_harmful_pattern():
+    """An empty model reply matches no harmful pattern."""
+    is_safe, reason = contains_harmful_pattern("")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_system_leak_and_card_expect_leak_reason():
+    """When several checks fail, moderate_output keeps the first reason: the system leak."""
+    is_safe, reason = moderate_output(
+        "My system prompt says the card is 4111111111111111."
+    )
+    assert is_safe is False
+    assert reason == "Output contains system information leak"
 
 
 def test_input_filtering():
