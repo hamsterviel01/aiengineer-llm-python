@@ -128,6 +128,10 @@ def is_attack(prompt: str) -> bool:
     return similarity_to_attack - similarity_to_safe > SOFT_BAND
 
 
+def output_moderation(response: str) -> bool:
+    pass
+
+
 def get_embedding(prompt: str) -> np.ndarray:
     url = f"{OLLAMA_BASE_URL}/api/embeddings"
     payload = {"model": EMBEDDING_MODEL, "prompt": prompt}

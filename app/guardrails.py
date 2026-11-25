@@ -121,6 +121,39 @@ def detect_policy_violation(text: str) -> Tuple[bool, str]:
     return False, ""
 
 
+# 13–16 digits only. Grouped cards are 4-4-4-4, or 15-digit Amex as 4-6-5.
+# Neighbor checks keep a match from being a slice of a longer digit run.
+_CARD_CANDIDATE = re.compile(
+    r"(?:"
+    r"(?<!\d)(?<!\d[\s-])"
+    r"(?:\d{4}[\s-]\d{6}[\s-]\d{5}|\d{4}[\s-]\d{4}[\s-]\d{4}[\s-]\d{4})"
+    r"(?!\d)(?![\s-]\d)"
+    r"|"
+    r"(?<!\d)\d{13,16}(?!\d)"
+    r")"
+)
+
+
+def _is_luhn_valid(digits: str) -> bool:
+    total = 0
+    for index, char in enumerate(reversed(digits)):
+        value = int(char)
+        if index % 2 == 1:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def _contains_credit_card(text: str) -> bool:
+    for match in _CARD_CANDIDATE.finditer(text):
+        digits = re.sub(r"\D", "", match.group(0))
+        if _is_luhn_valid(digits):
+            return True
+    return False
+
+
 def moderate_output(text: str) -> Tuple[bool, str]:
     """
     Moderate LLM output for safety issues.
@@ -143,11 +176,13 @@ def moderate_output(text: str) -> Tuple[bool, str]:
         if leak in text_lower:
             return False, "Output contains system information leak"
 
+    if _contains_credit_card(text):
+        return False, "Output contains credit card number"
+
     # Check for potentially harmful output
     harmful_patterns = [
         r"\b(password|credit card|ssn)\b.*[:=]",
         r"\d{3}-\d{2}-\d{4}",  # SSN pattern
-        r"\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}",  # Credit card pattern
     ]
 
     for pattern in harmful_patterns:

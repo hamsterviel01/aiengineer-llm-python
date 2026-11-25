@@ -62,6 +62,68 @@ def test_output_moderation_working(client_with_mock_llm):
     assert "system information leak" in reason.lower()
 
 
+def test_input_luhn_valid_card_expect_blocked():
+    """A 13–16 digit number that passes Luhn is a card and must be blocked."""
+    is_safe, reason = moderate_output("Card on file: 4111111111111111.")
+    assert is_safe is False
+    assert "credit card" in reason.lower()
+
+    is_safe, reason = moderate_output("Card on file: 4222222222222.")
+    assert is_safe is False
+    assert "credit card" in reason.lower()
+
+
+def test_input_luhn_invalid_same_length_expect_allowed():
+    """A 16-digit number that fails Luhn is not a card."""
+    is_safe, reason = moderate_output("Reference 4111111111111112 is not a card.")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_spaced_or_dashed_card_expect_blocked():
+    """Separators between groups do not hide a Luhn-valid card."""
+    is_safe, reason = moderate_output("Card 4111 1111 1111 1111 was charged.")
+    assert is_safe is False
+    assert "credit card" in reason.lower()
+
+    is_safe, reason = moderate_output("Card 4111-1111-1111-1111 was charged.")
+    assert is_safe is False
+    assert "credit card" in reason.lower()
+
+
+def test_input_amex_4_6_5_expect_blocked():
+    """A 15-digit Amex number in 4-6-5 groups that passes Luhn is blocked."""
+    is_safe, reason = moderate_output("Amex 3782 822463 10005 is on the order.")
+    assert is_safe is False
+    assert "credit card" in reason.lower()
+
+
+def test_input_longer_digit_run_expect_allowed():
+    """Digits attached to a longer run, or lengths outside 13–16, are not cards."""
+    is_safe, reason = moderate_output("Tracking 41111111111111113 is a 17-digit id.")
+    assert is_safe is True
+    assert reason == ""
+
+    is_safe, reason = moderate_output("Account 4111111111111111003 is 19 digits.")
+    assert is_safe is True
+    assert reason == ""
+
+    is_safe, reason = moderate_output("Ref 54111 1111 1111 1111 is a longer grouped id.")
+    assert is_safe is True
+    assert reason == ""
+
+    is_safe, reason = moderate_output("Ref 4111 1111 1111 11112 is a longer grouped id.")
+    assert is_safe is True
+    assert reason == ""
+
+
+def test_input_shipping_sentence_expect_allowed():
+    """Ordinary order text with short numbers stays safe."""
+    is_safe, reason = moderate_output("Your order will arrive in 3-5 business days.")
+    assert is_safe is True
+    assert reason == ""
+
+
 def test_input_filtering():
     """
     Test input filtering for valid inputs.
