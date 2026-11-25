@@ -1,6 +1,7 @@
 """FastAPI application for customer service with LLM integration."""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException
 from langchain_ollama import OllamaLLM
@@ -13,6 +14,7 @@ from app.guardrails import (
     filter_input,
     moderate_output,
 )
+from app.guardrails_semantic import ensure_embeddings_loaded, is_attack
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -46,11 +48,19 @@ else:
     tracer = None
     logger.info("Phoenix tracing disabled")
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    ensure_embeddings_loaded()
+    yield
+
+
 # Initialize FastAPI app
 app = FastAPI(
     title="Customer Service AI",
     description="E-commerce customer service application with AI assistance",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # Initialize Ollama LLM
@@ -132,7 +142,7 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
 
     filtered_question = filtered_or_reason
 
-    # Step 2: Prompt injection detection
+    # Step 2: Prompt injection detection & other attacks detection
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("prompt_injection_detection") as span:
             is_injection, injection_reason = detect_prompt_injection(filtered_question)
@@ -140,17 +150,28 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             if is_injection:
                 span.set_attribute("guardrail.reason", injection_reason)
     else:
-        is_injection, injection_reason = detect_prompt_injection(filtered_question)
+        # is_injection, injection_reason = detect_prompt_injection(filtered_question)
+        is_other_attack = is_attack(filtered_question)
 
-    if is_injection:
-        logger.warning(f"Prompt injection detected: {injection_reason}")
+    # if is_injection:
+    #     logger.warning(f"Prompt injection detected: {injection_reason}")
+    #     if parent_span:
+    #         parent_span.set_attribute("output.blocked", True)
+    #         parent_span.set_attribute("output.block_reason", "prompt_injection")
+    #     return QueryResponse(
+    #         answer="",
+    #         blocked=True,
+    #         reason="I cannot process this request. Reason: Prompt injection attempt detected.",
+    #     )
+    if is_other_attack:
+        logger.warning(f"Attack detected: {filtered_question}")
         if parent_span:
             parent_span.set_attribute("output.blocked", True)
-            parent_span.set_attribute("output.block_reason", "prompt_injection")
+            parent_span.set_attribute("output.block_reason", "attack")
         return QueryResponse(
             answer="",
             blocked=True,
-            reason="I cannot process this request. Reason: Prompt injection attempt detected.",
+            reason="I cannot process this request. Reason: Attack detected.",
         )
 
     # Step 3: Policy violation detection

@@ -106,17 +106,17 @@ def detect_policy_violation(text: str) -> Tuple[bool, str]:
     # Check for harmful content
     for keyword in harmful_keywords:
         if keyword in text_lower:
-            return True, f"Policy violation: Harmful/illegal content"
+            return True, "Policy violation: Harmful/illegal content"
 
     # Check for personal data requests
     for keyword in personal_data_keywords:
         if keyword in text_lower:
-            return True, f"Policy violation: Personal data request"
+            return True, "Policy violation: Personal data request"
 
     # Check for off-topic queries
     for keyword in off_topic_keywords:
         if keyword in text_lower:
-            return True, f"Policy violation: Off-topic query"
+            return True, "Policy violation: Off-topic query"
 
     return False, ""
 

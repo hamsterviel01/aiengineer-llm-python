@@ -323,7 +323,7 @@ def main():
     )
     parser.add_argument("--api-url", default="http://localhost:8000/query", help="API endpoint URL")
     parser.add_argument(
-        "--sample-size", type=int, default=20, help="Number of samples to evaluate (default: 10)"
+        "--sample-size", type=int, default=100, help="Number of samples to evaluate (default: 10)"
     )
     parser.add_argument("--output", default=None, help="Output JSON file for results (optional)")
 
