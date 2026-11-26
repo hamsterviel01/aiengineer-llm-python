@@ -34,6 +34,8 @@ services:
         ollama pull smollm2:135m
         echo "Pulling nomic-embed-text model..."
         ollama pull nomic-embed-text
+        echo "Pulling bespoke-minicheck model..."
+        ollama pull bespoke-minicheck
         echo "Models successfully pulled!"
     networks:
       - app_network
@@ -68,6 +70,7 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - LLM_MODEL=smollm2:135m
       - EMBEDDING_MODEL=nomic-embed-text
+      - FACT_CHECK_MODEL=bespoke-minicheck
       - PHOENIX_ENDPOINT=http://phoenix:6006
       - PHOENIX_ENABLED=true
     depends_on:

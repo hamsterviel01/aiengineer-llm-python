@@ -5,6 +5,7 @@ from typing import Tuple
 
 from app.guardrails_helpers import (
     contains_credit_card,
+    contains_hallucination,
     contains_harmful_pattern,
     contains_system_leak,
 )
@@ -127,9 +128,12 @@ def detect_policy_violation(text: str) -> Tuple[bool, str]:
     return False, ""
 
 
-def moderate_output(text: str) -> Tuple[bool, str]:
+def moderate_output(text: str, context: str = "") -> Tuple[bool, str]:
     """
     Moderate LLM output for safety issues.
+
+    Args:
+        context: Source text the answer must be grounded in; empty skips the hallucination check.
 
     Returns:
         Tuple of (is_safe, reason_if_unsafe)
@@ -138,4 +142,4 @@ def moderate_output(text: str) -> Tuple[bool, str]:
         is_safe, reason = check(text)
         if not is_safe:
             return is_safe, reason
-    return True, ""
+    return contains_hallucination(text, context)

@@ -8,7 +8,14 @@ from fastapi import FastAPI, HTTPException
 from langchain_ollama import OllamaLLM
 from pydantic import BaseModel
 
-from app.config import LLM_MODEL, OLLAMA_BASE_URL, PHOENIX_ENABLED, PHOENIX_ENDPOINT, SYSTEM_PROMPT
+from app.config import (
+    LLM_MODEL,
+    OLLAMA_BASE_URL,
+    PHOENIX_ENABLED,
+    PHOENIX_ENDPOINT,
+    STORE_POLICY,
+    SYSTEM_PROMPT,
+)
 from app.guardrails import (
     detect_policy_violation,
     detect_prompt_injection,
@@ -198,7 +205,10 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
 
     # Step 4: Call LLM
     try:
-        full_prompt = f"{SYSTEM_PROMPT}\n\nCustomer: {filtered_question}\n\nAssistant:"
+        full_prompt = (
+            f"{SYSTEM_PROMPT}\n\nAnswer using only this store policy:\n\n{STORE_POLICY}"
+            f"\n\nCustomer: {filtered_question}\n\nAssistant:"
+        )
         response = await llm.ainvoke(full_prompt)
         logger.info(f"LLM response generated: {response[:200]}...")
 
@@ -214,12 +224,14 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
     # Step 5: Output moderation
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("output_moderation") as span:
-            is_safe, safety_reason = await asyncio.to_thread(moderate_output, response)
+            is_safe, safety_reason = await asyncio.to_thread(
+                moderate_output, response, STORE_POLICY
+            )
             span.set_attribute("guardrail.passed", is_safe)
             if not is_safe:
                 span.set_attribute("guardrail.reason", safety_reason)
     else:
-        is_safe, safety_reason = await asyncio.to_thread(moderate_output, response)
+        is_safe, safety_reason = await asyncio.to_thread(moderate_output, response, STORE_POLICY)
 
     if not is_safe:
         logger.warning(f"Output moderation blocked: {safety_reason}")

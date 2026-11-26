@@ -57,11 +57,25 @@ def test_safe_query_valid_input(client_with_mock_llm):
     assert mock_llm.ainvoke.called
 
 
+def test_input_query_expect_store_policy_in_prompt(client_with_mock_llm):
+    client, mock_llm = client_with_mock_llm
+    client.post("/query", json={"question": "What is your return policy?"})
+    assert "## Returns" in mock_llm.ainvoke.call_args.args[0]
+
+
+def test_input_llm_wrong_policy_number_expect_blocked(client_with_mock_llm):
+    """An answer that contradicts a number in the store policy is blocked."""
+    client, mock_llm = client_with_mock_llm
+    mock_llm.ainvoke.return_value = "Items can be returned within 90 days of delivery."
+    data = client.post("/query", json={"question": "What is your return policy?"}).json()
+    assert data["blocked"] is True
+
+
 def test_input_concurrent_requests_with_slow_moderation_expect_handled_in_parallel():
     """A slow, blocking moderate_output must not stop the server from serving other requests."""
     delay, n_requests = 0.5, 4
 
-    def slow_moderation(text):
+    def slow_moderation(text, context=""):
         time.sleep(delay)
         return True, ""
 

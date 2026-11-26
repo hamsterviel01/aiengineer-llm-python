@@ -1,11 +1,13 @@
 """Configuration settings for the customer service application."""
 
 import os
+from pathlib import Path
 
 # Ollama API settings
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 LLM_MODEL = os.getenv("LLM_MODEL", "smollm2:135m")
 EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "nomic-embed-text")
+FACT_CHECK_MODEL = os.getenv("FACT_CHECK_MODEL", "bespoke-minicheck")
 
 # Application settings
 APP_HOST = os.getenv("APP_HOST", "0.0.0.0")
@@ -26,4 +28,7 @@ You assist customers with:
 
 Provide clear, concise, and helpful responses. If you cannot help with a request, 
 politely explain why."""
+
+# Store policy given to the LLM and used as ground truth by the hallucination check
+STORE_POLICY = (Path(__file__).parent / "store_policy.md").read_text()
 
