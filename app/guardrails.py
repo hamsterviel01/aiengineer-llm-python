@@ -3,6 +3,8 @@
 import re
 from typing import Tuple
 
+from app.guardrails_models import GuardVerdict
+
 
 def filter_input(text: str) -> Tuple[bool, str]:
     """
@@ -14,7 +16,7 @@ def filter_input(text: str) -> Tuple[bool, str]:
     if not text or len(text.strip()) == 0:
         return False, "Input cannot be empty"
     
-    if len(text) < 1000:
+    if len(text) > 1000:
         return False, "Input is too long (max 1000 characters)"
     
     filtered = text.strip()
@@ -32,7 +34,7 @@ def detect_prompt_injection(text: str) -> Tuple[bool, str]:
     
     # Common prompt injection patterns
     injection_patterns = [
-        r"ignore (previous|above|all) (instructions|rules|prompts)",
+        r"ignore (?:\w+\s+)?(instructions|rules|prompts)",
         r"ignore all (previous|above)",
         r"disregard (previous|above|all)",
         r"forget (your|previous|all) (instructions|rules|training)",
@@ -81,23 +83,23 @@ def detect_policy_violation(text: str) -> Tuple[bool, str]:
         "weather", "sports", "politics", "religion",
         "movie", "recipe", "travel destination", "homework"
     ]
-    
-    # Check for harmful content
-    for keyword in harmful_keywords:
-        if keyword in text_lower:
-            return False, f"Policy violation: Harmful/illegal content"
-    
-    # Check for personal data requests
-    for keyword in personal_data_keywords:
-        if keyword in text_lower:
-            return False, f"Policy violation: Personal data request"
-    
-    # Check for off-topic queries
-    for keyword in off_topic_keywords:
-        if keyword in text_lower:
-            return False, f"Policy violation: Off-topic query"
 
-    return True, ""
+    checks = [
+        (harmful_keywords, "Policy violation: Harmful/illegal content"),
+        (personal_data_keywords, "Policy violation: Personal data request"),
+        (off_topic_keywords, "Policy violation: Off-topic query"),
+    ]
+    for keywords, reason in checks:
+        if _matches_any_word(text_lower, keywords):
+            return True, reason
+
+    return False, ""
+
+
+def _matches_any_word(text: str, keywords: list[str]) -> bool:
+    """Match whole words plus common endings: "harm" hits "harmful", not "pharmacy"."""
+    words = "|".join(re.escape(k) for k in keywords)
+    return re.search(rf"\b(?:{words})(?:s|es|ed|ing|ful|er|ers)?\b", text) is not None
 
 
 def moderate_output(text: str) -> Tuple[bool, str]:
@@ -131,4 +133,28 @@ def moderate_output(text: str) -> Tuple[bool, str]:
             return False, "Output contains sensitive information"
     
     return True, ""
+
+
+def classify_input(user_message: str) -> GuardVerdict:
+    """
+    Keyword safety guard for customer messages (same interface as guardrails_classifier_model).
+
+    Returns:
+        GuardVerdict(is_safe, reason_if_unsafe, violated_category_codes); keyword checks have
+        no category codes, so the list is always empty.
+    """
+    is_violation, reason = detect_policy_violation(user_message)
+    return GuardVerdict(not is_violation, reason, [])
+
+
+def classify_output(user_message: str, agent_response: str) -> GuardVerdict:
+    """
+    Keyword safety guard for LLM responses (same interface as guardrails_classifier_model).
+
+    Always passes: keyword output checks already run in moderate_output.
+
+    Returns:
+        GuardVerdict(is_safe, reason_if_unsafe, violated_category_codes)
+    """
+    return GuardVerdict(True, "", [])
 

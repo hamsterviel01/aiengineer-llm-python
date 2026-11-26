@@ -9,6 +9,11 @@ The application provides a customer service chatbot powered by a locally-hosted 
 - Policy-violating content (harmful/illegal, personal data requests, off-topic queries)
 - Unsafe outputs
 
+`SAFETY_GUARD` selects one guard module that runs every guardrail step (input filtering, prompt injection, input safety including off-topic, output moderation, output safety). Both modules expose the same functions and differ only in method:
+
+- `llama_guard` (default): [Llama Guard 3 1B](https://ollama.com/library/llama-guard3) (`app/guardrails_classifier_model.py`), served by the `llama-guard` docker-compose service on port `11435`. Prompt injection and off-topic map to custom categories S15/S16; each message is classified once and reused across input steps. If the classifier is unreachable, requests are blocked.
+- `keyword`: regex and keyword lists (`app/guardrails.py`), no model needed.
+
 ## Prerequisites
 
 - Docker and Docker Compose
@@ -62,17 +67,33 @@ After fixing the bugs, discuss and optionally implement:
 1. **Defense-in-depth strategies**:
    - How would you improve the pre-filtering?
    - What additional output moderation would you add?
+   # TODO - learn:
+     SAFE, Policy violation, injection
+     Need to check 
+     - PII leakage, 
+     - hallucination (add lightweight model at output to check hallucination, cannot use embedding)
+     Add human in the loop.
    - How would you handle edge cases?
+   # TODO - use one method to check other method edge cases. Ollama edge case is hallucination while khoa embedding is 
 
 2. **Monitoring and logging**:
    - What metrics would you track?
+   # TODO - FP, FN, precision, recall, etc.
    - How would you detect new attack patterns?
+   # TODO - use LLM to generate new attack conversations - slurge expensive. 
+   # And human in the loops
+   # We can also use ensembles of methodst to discover each other edge cases.
    - What alerts would you set up?
+   # TODO Ambiguous cases --> enable human in the loop
 
 3. **Trade-offs**:
-   - False positives vs false negatives
-   - Latency vs thoroughness
-   - Explainability vs accuracy
+   - False positives vs false negatives - Adjust thresholds
+   - Latency vs thoroughness - can even run both method in parralel.
+   - Explainability (why we reject) vs accuracy ()
+   # TODO - rule based vs LLM-based
+
+   # TODO - very important - confusion metrics. VERY IMPORTANT.
+
 
 ## Configuration
 
@@ -80,6 +101,10 @@ Environment variables (see `app/config.py`):
 - `OLLAMA_BASE_URL`: Ollama API endpoint (default: `http://localhost:11434`)
 - `LLM_MODEL`: LLM model name (default: `smollm2:135m`)
 - `EMBEDDING_MODEL`: Embedding model name (default: `nomic-embed-text`)
+- `SAFETY_GUARD`: Safety guard for input/output classification: `llama_guard` (Llama Guard 3, `app/guardrails_classifier_model.py`) or `keyword` (keyword lists, `app/guardrails.py`) (default: `llama_guard`)
+- `GUARD_BASE_URL`: Ollama endpoint serving the guard model (default: `http://localhost:11435`)
+- `GUARD_MODEL`: Guard classifier model name (default: `llama-guard3:1b`)
+- `GUARD_TIMEOUT`: Guard classifier request timeout in seconds (default: `30`)
 - `APP_HOST`: Application host (default: `0.0.0.0`)
 - `APP_PORT`: Application port (default: `8000`)
 - `PHOENIX_ENDPOINT`: Phoenix observability endpoint (default: `http://localhost:6006`)

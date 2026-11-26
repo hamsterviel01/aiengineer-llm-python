@@ -1,3 +1,53 @@
+# ==============================================================================================
+# MODEL SIZING NOTES (for scaling calculations)
+# ==============================================================================================
+# Hardware: Docker Desktop for Mac, 8 vCPU, 7.7 GiB VM, CPU only (Docker on macOS has no GPU).
+# Measured 2026-11-24 with a warm model and fresh prompts. Re-measure on your target hardware.
+#
+# | Model            | Params | Quant | Disk   | RAM    | Prompt tok/s | Gen tok/s | Latency         |
+# |------------------|--------|-------|--------|--------|--------------|-----------|-----------------|
+# | smollm2:135m     | 135M   | F16   | 270 MB | 0.4 GB | 600-950      | 100-130   | 0.2-1.4 s       |
+# | llama-guard3:1b  | 1.5B   | Q8_0  | 1.6 GB | 1.8 GB | 830-1150     | 75-100    | 200-270 ms      |
+# | nomic-embed-text | 137M   | F16   | 274 MB | 0.4 GB | -            | -         | 25-45 ms / text |
+#
+# Latency notes: smollm2 is for up to 128 generated tokens; llama-guard for ~205 prompt tokens.
+#
+# Where each model runs:
+# | Model            | Container   | Pulled by              | Used on /chat?          |
+# |------------------|-------------|------------------------|-------------------------|
+# | smollm2:135m     | ollama      | ollama-init            | yes (answers the user)  |
+# | nomic-embed-text | ollama      | ollama-init            | no (pulled, unused)     |
+# | llama-guard3:1b  | llama-guard | llama-guard (itself)   | yes (input + output)    |
+#
+# How to scale:
+# - Compute (prompt phase):
+#     - Rule of thumb: each token costs ~2 FLOPs per parameter (one multiply + one add per
+#       weight; Kaplan et al. 2020, sec 2.1).
+#     - Step 1, FLOPs per token = 2 x params - To process one token, the token's vector is multiplied through every weight matrix in every layer:
+#         smollm2:     2 x 135M = 0.27 GFLOP per token
+#         llama-guard: 2 x 1.5B = 3 GFLOP per token  (a bit less, as the embedding lookup is free)
+#     - Step 2, FLOPs per second = FLOPs per token x tokens per second:
+#         llama-guard reads ~1000 prompt tokens per second (a rate, not 1000-token prompts;
+#         a ~205-token guard prompt takes ~0.2 s, so ~5 prompts/s):
+#         3 GFLOP x 1000 = 3,000 GFLOP/s = 3 TFLOPS
+#     - So reading prompts at our measured speed needs ~3 TFLOPS of real compute. To go 10x
+#       faster you need ~30 TFLOPS, which is why a GPU helps this phase the most.
+# - Memory bandwidth (generation phase):
+#     - tok/s ~= bandwidth / model size in RAM.
+#     - llama-guard: ~95 tok/s x 1.6 GB ~= 150 GB/s; a 1 TB/s GPU would be ~6x faster.
+# - One /chat request:
+#     - guard(input) -> smollm2 -> guard(output), run one after another.
+#     - ~0.7-2 s end to end here, i.e. ~1 request/s per stack.
+#     - Parallel requests share the same CPUs, so throughput does not scale linearly.
+#     - To scale out, add hosts or GPUs.
+# - Measurement pitfalls:
+#     - First request after a model loads adds ~1 s.
+#     - Repeated identical prompts hit Ollama's prompt cache (guard: 54 ms cached vs 866 ms cold),
+#       so always benchmark with fresh prompts.
+#
+# Ref: https://github.com/ollama/ollama/blob/main/docs/api.md (eval_count / eval_duration)
+# Ref: https://arxiv.org/abs/2001.08361 (FLOPs per token ~= 2N)
+# ==============================================================================================
 services:
   # Ollama service for LLM and embedding models
   ollama:
@@ -16,7 +66,11 @@ services:
     networks:
       - app_network
 
-  # Model initialization service (runs once to pull models)
+  # One-shot job that downloads models into the `ollama` service, then exits.
+  # - ollama/ollama ships runtime only (models are large, user-chosen, separately licensed and
+  #   versioned), and `ollama serve` never pulls; without this the app gets "model not found".
+  # - Models land in the shared `ollama_data` volume, so they persist and re-pulls are no-ops.
+  # - `app` waits for `service_completed_successfully`; llama-guard pulls its own model.
   ollama-init:
     image: ollama/ollama:latest
     container_name: ollama-init
@@ -39,6 +93,39 @@ services:
       - app_network
     restart: "no"
 
+  # Llama Guard safety classifier, served by a dedicated Ollama instance
+  llama-guard:
+    image: ollama/ollama:latest
+    container_name: llama-guard
+    ports:
+      - "11435:11434"
+    environment:
+      - OLLAMA_KEEP_ALIVE=-1  # keep the guard in memory so every request skips the model load
+    volumes:
+      - guard_data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        ollama serve &
+        pid=$$!
+        trap 'kill $$pid' TERM INT
+        until ollama list > /dev/null 2>&1; do sleep 1; done
+        echo "Pulling llama-guard3:1b model..."
+        ollama pull llama-guard3:1b
+        echo "Warming up llama-guard3:1b..."
+        ollama run llama-guard3:1b "hello" > /dev/null
+        echo "Guard model ready!"
+        wait $$pid
+    healthcheck:
+      test: ["CMD-SHELL", "ollama show llama-guard3:1b > /dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    networks:
+      - app_network
+    restart: unless-stopped
+
   # Phoenix observability platform
   phoenix:
     image: arizephoenix/phoenix:latest
@@ -49,6 +136,7 @@ services:
     environment:
       - PHOENIX_HOST=0.0.0.0
       - PHOENIX_PORT=6006
+      - PHOENIX_ENABLE_AUTH=false
     volumes:
       - phoenix_data:/phoenix
     networks:
@@ -67,6 +155,9 @@ services:
       - OLLAMA_BASE_URL=http://ollama:11434
       - LLM_MODEL=smollm2:135m
       - EMBEDDING_MODEL=nomic-embed-text
+      - SAFETY_GUARD=${SAFETY_GUARD:-llama_guard}
+      - GUARD_BASE_URL=http://llama-guard:11434
+      - GUARD_MODEL=llama-guard3:1b
       - PHOENIX_ENDPOINT=http://phoenix:6006
       - PHOENIX_ENABLED=true
     depends_on:
@@ -74,6 +165,8 @@ services:
         condition: service_healthy
       ollama-init:
         condition: service_completed_successfully
+      llama-guard:
+        condition: service_healthy
       phoenix:
         condition: service_started
     networks:
@@ -83,6 +176,8 @@ services:
 
 volumes:
   ollama_data:
+    driver: local
+  guard_data:
     driver: local
   phoenix_data:
     driver: local

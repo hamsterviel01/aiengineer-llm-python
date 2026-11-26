@@ -59,8 +59,16 @@ def get_embedding(text: str, base_url: str = OLLAMA_BASE_URL, model: str = EMBED
     
     response = httpx.post(url, json=payload, timeout=30.0)
     response.raise_for_status()
-    
-    return 
+
+    return np.array(response.json()["embedding"], dtype=float)
+
+
+def cosine_similarity(a: np.ndarray, b: np.ndarray) -> float:
+    """Cosine similarity of two vectors: 1.0 = same direction, 0.0 = unrelated."""
+    norm = np.linalg.norm(a) * np.linalg.norm(b)
+    if norm == 0:
+        return 0.0
+    return float(np.dot(a, b) / norm)
 
 
 def query_api(question: str, api_url: str = "http://localhost:8000/query") -> Dict:
@@ -142,8 +150,10 @@ def _evaluate_response_internal(
     # Calculate similarity only for safe queries that returned an answer
     if category == "safe" and not was_blocked and api_response.get("answer"):
         try:
-            
             # Calculate similarity score between ground truth and api response
+            result["similarity"] = cosine_similarity(
+                get_embedding(ground_truth), get_embedding(api_response["answer"])
+            )
 
             if span:
                 span.set_attribute("evaluation.similarity", result["similarity"])
@@ -259,7 +269,10 @@ def calculate_metrics(results: List[Dict]) -> Dict:
     # Overall metrics
     avg_similarity = np.mean([r["similarity"] for r in results])
     blocking_accuracy = np.mean([r["correct_blocking"] for r in results])
-    
+    # Answer quality only: safe rows that got an answer (blocked rows score 1.0 and inflate the overall)
+    answered = [r["similarity"] for r in results if r["category"] == "safe" and not r["blocked"]]
+    safe_answer_similarity = float(np.mean(answered)) if answered else 0.0
+
     # Per-category metrics
     categories = {}
     for result in results:
@@ -280,6 +293,8 @@ def calculate_metrics(results: List[Dict]) -> Dict:
         "total_samples": total,
         "overall_avg_similarity": float(avg_similarity),
         "overall_blocking_accuracy": float(blocking_accuracy),
+        "safe_answer_similarity": safe_answer_similarity,
+        "safe_answered_count": len(answered),
         "by_category": category_metrics
     }
 
@@ -295,6 +310,8 @@ def print_report(evaluation_results: Dict):
     print(f"\nTotal Samples: {metrics['total_samples']}")
     print(f"Overall Average Similarity: {metrics['overall_avg_similarity']:.3f}")
     print(f"Overall Blocking Accuracy: {metrics['overall_blocking_accuracy']:.3f}")
+    print(f"Safe-Answer Similarity: {metrics['safe_answer_similarity']:.3f} "
+          f"(n={metrics['safe_answered_count']} answered safe queries)")
     
     print("\n" + "-"*60)
     print("PER-CATEGORY METRICS")
