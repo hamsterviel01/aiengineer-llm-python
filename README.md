@@ -63,11 +63,13 @@ After fixing the bugs, discuss and optionally implement:
    - How would you improve the pre-filtering?
    - What additional output moderation would you add?
    - How would you handle edge cases?
+<!-- review anchor: Task 3 defense-in-depth -->
 
 2. **Monitoring and logging**:
    - What metrics would you track?
    - How would you detect new attack patterns?
    - What alerts would you set up?
+<!-- review anchor: Task 3 monitoring -->
 
 3. **Trade-offs**:
    - False positives vs false negatives
