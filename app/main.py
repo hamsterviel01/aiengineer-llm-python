@@ -1,5 +1,6 @@
 """FastAPI application for customer service with LLM integration."""
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -213,12 +214,12 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
     # Step 5: Output moderation
     if PHOENIX_ENABLED and tracer and parent_span:
         with tracer.start_as_current_span("output_moderation") as span:
-            is_safe, safety_reason = moderate_output(response)
+            is_safe, safety_reason = await asyncio.to_thread(moderate_output, response)
             span.set_attribute("guardrail.passed", is_safe)
             if not is_safe:
                 span.set_attribute("guardrail.reason", safety_reason)
     else:
-        is_safe, safety_reason = moderate_output(response)
+        is_safe, safety_reason = await asyncio.to_thread(moderate_output, response)
 
     if not is_safe:
         logger.warning(f"Output moderation blocked: {safety_reason}")

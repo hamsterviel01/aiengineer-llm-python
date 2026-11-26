@@ -1,5 +1,8 @@
+import asyncio
+import time
 from unittest.mock import AsyncMock, patch
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -52,6 +55,40 @@ def test_safe_query_valid_input(client_with_mock_llm):
     assert data["blocked"] is False
     assert len(data["answer"]) > 0
     assert mock_llm.ainvoke.called
+
+
+def test_input_concurrent_requests_with_slow_moderation_expect_handled_in_parallel():
+    """A slow, blocking moderate_output must not stop the server from serving other requests."""
+    delay, n_requests = 0.5, 4
+
+    def slow_moderation(text):
+        time.sleep(delay)
+        return True, ""
+
+    async def send_all():
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
+            return await asyncio.gather(
+                *(ac.post("/query", json={"question": "Where is my order?"})
+                  for _ in range(n_requests))
+            )
+
+    with patch("app.main.llm") as mock_llm, patch("app.main.moderate_output", slow_moderation):
+        mock_llm.ainvoke = AsyncMock(return_value="Your order is on its way.")
+        start = time.perf_counter()
+        responses = asyncio.run(send_all())
+        elapsed = time.perf_counter() - start
+
+    assert all(r.status_code == 200 and r.json()["blocked"] is False for r in responses)
+    assert elapsed < delay * n_requests * 0.6, f"requests ran one at a time ({elapsed:.2f}s)"
+
+
+def test_input_unsafe_output_with_slow_moderation_expect_blocked():
+    """Running moderation off the event loop still blocks unsafe answers."""
+    with patch("app.main.llm") as mock_llm:
+        mock_llm.ainvoke = AsyncMock(return_value="Card on file: 4111111111111111.")
+        data = TestClient(app).post("/query", json={"question": "Where is my order?"}).json()
+    assert data["blocked"] is True
 
 
 def test_output_moderation_working(client_with_mock_llm):

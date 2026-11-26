@@ -1,6 +1,8 @@
+import contextvars
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Dict, List
 
@@ -174,6 +176,7 @@ def run_evaluation(
     dataset_path: str = "data/qa_dataset.json",
     api_url: str = "http://localhost:8000/query",
     sample_size: int = None,
+    concurrency: int = 5,
 ) -> Dict:
     """
     Run full evaluation on the dataset.
@@ -182,6 +185,7 @@ def run_evaluation(
         dataset_path: Path to Q&A dataset JSON
         api_url: API endpoint URL
         sample_size: Optional limit on number of samples to evaluate
+        concurrency: Number of samples queried and evaluated at the same time
 
     Returns:
         Evaluation results with metrics
@@ -192,13 +196,13 @@ def run_evaluation(
             span.set_attribute("evaluation.api_url", api_url)
             if sample_size:
                 span.set_attribute("evaluation.sample_size", sample_size)
-            return _run_evaluation_internal(dataset_path, api_url, sample_size, span)
+            return _run_evaluation_internal(dataset_path, api_url, sample_size, concurrency, span)
     else:
-        return _run_evaluation_internal(dataset_path, api_url, sample_size, None)
+        return _run_evaluation_internal(dataset_path, api_url, sample_size, concurrency, None)
 
 
 def _run_evaluation_internal(
-    dataset_path: str, api_url: str, sample_size: int, parent_span
+    dataset_path: str, api_url: str, sample_size: int, concurrency: int, parent_span
 ) -> Dict:
     """Internal evaluation logic with optional tracing."""
     print(f"Loading dataset from {dataset_path}...")
@@ -213,18 +217,20 @@ def _run_evaluation_internal(
     if parent_span:
         parent_span.set_attribute("evaluation.total_samples", len(dataset))
 
-    results = []
-
-    for i, item in enumerate(dataset):
-        # Print progress with proper line clearing to avoid text overlap
-        progress_text = f"Evaluating {i + 1}/{len(dataset)}: {item['category']}"
-        print(f"\r{progress_text:<60}", end="", flush=True)
-
+    def evaluate_item(item: Dict) -> Dict:
         api_response = query_api(item["prompt"], api_url)
-        eval_result = evaluate_response(
+        return evaluate_response(
             item["prompt"], item["ground_truth"], api_response, item["category"]
         )
-        results.append(eval_result)
+
+    # Each task runs in a copy of the current context so its spans stay under evaluation_run.
+    with ThreadPoolExecutor(max_workers=concurrency) as executor:
+        futures = [
+            executor.submit(contextvars.copy_context().run, evaluate_item, item) for item in dataset
+        ]
+        for done, _ in enumerate(as_completed(futures), start=1):
+            print(f"\r{f'Evaluated {done}/{len(dataset)}':<60}", end="", flush=True)
+        results = [future.result() for future in futures]
 
     print()  # New line after progress
 
@@ -323,15 +329,21 @@ def main():
     )
     parser.add_argument("--api-url", default="http://localhost:8000/query", help="API endpoint URL")
     parser.add_argument(
-        "--sample-size", type=int, default=100, help="Number of samples to evaluate (default: 10)"
+        "--sample-size", type=int, default=20, help="Number of samples to evaluate (default: 10)"
     )
     parser.add_argument("--output", default=None, help="Output JSON file for results (optional)")
+    parser.add_argument(
+        "--concurrency", type=int, default=5, help="Number of parallel API requests (default: 5)"
+    )
 
     args = parser.parse_args()
 
     # Run evaluation
     evaluation_results = run_evaluation(
-        dataset_path=args.dataset, api_url=args.api_url, sample_size=args.sample_size
+        dataset_path=args.dataset,
+        api_url=args.api_url,
+        sample_size=args.sample_size,
+        concurrency=args.concurrency,
     )
 
     # Print report
