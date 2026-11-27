@@ -11,6 +11,13 @@ from app.guardrails import (
 )
 
 
+@pytest.fixture(autouse=True)
+def no_semantic_guard():
+    """Keep app tests offline: the semantic guard needs Ollama and has its own tests."""
+    with patch("app.main.semantic_decision", return_value=("allow", "")):
+        yield
+
+
 @pytest.fixture
 def client():
     """Create a test client for the FastAPI app."""
@@ -178,5 +185,16 @@ def test_prompt_injection_patterns():
         "act as a hacker",
     ]
     
-    assert False, "Test not implemented"
+    for attempt in injection_attempts:
+        is_injection, reason = detect_prompt_injection(attempt)
+        assert is_injection is True, f"Not detected: {attempt}"
+        assert "injection" in reason.lower()
+
+
+def test_policy_keywords_match_whole_words():
+    """Keywords match whole words, so normal shopping words are not blocked."""
+    for blocked in ["Can I hack the site?", "Is this harmful?", "Who is stealing packages?"]:
+        assert detect_policy_violation(blocked)[0] is True, blocked
+    for safe in ["Do you ship to my pharmacy?", "Is the drugstore open?", "I need shacks"]:
+        assert detect_policy_violation(safe)[0] is False, safe
 

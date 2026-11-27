@@ -12,6 +12,12 @@ from app.guardrails import (
     detect_policy_violation,
     moderate_output,
 )
+from app.semantic_guard import semantic_decision
+
+CLARIFY_MESSAGE = (
+    "Sorry, I'm not sure I understood. Could you rephrase your question about orders, "
+    "shipping, returns, products or your account? You can also contact our support team."
+)
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -82,8 +88,10 @@ async def root():
     return {"status": "ok", "service": "Customer Service AI"}
 
 
+# Plain def (not async): llm.invoke() blocks, so FastAPI must run this in its thread pool.
+# As async def, one slow LLM call froze the event loop and every other request timed out.
 @app.post("/query", response_model=QueryResponse)
-async def query(request: QueryRequest) -> QueryResponse:
+def query(request: QueryRequest) -> QueryResponse:
     """
     Process customer service queries with guardrails.
     
@@ -101,12 +109,12 @@ async def query(request: QueryRequest) -> QueryResponse:
         with tracer.start_as_current_span("customer_query") as span:
             span.set_attribute("input.value", question)
             span.set_attribute("input.length", len(question))
-            return await _process_query(question, span)
+            return _process_query(question, span)
     else:
-        return await _process_query(question, None)
+        return _process_query(question, None)
 
 
-async def _process_query(question: str, parent_span) -> QueryResponse:
+def _process_query(question: str, parent_span) -> QueryResponse:
     """Internal function to process query with optional tracing."""
     
     # Step 1: Input filtering
@@ -173,7 +181,28 @@ async def _process_query(question: str, parent_span) -> QueryResponse:
             blocked=True,
             reason=f"I cannot process this request. Reason: {violation_reason}",
         )
-    
+
+    # Step 3b: Semantic guard (catches paraphrases the keyword rules miss; fails open)
+    action, semantic_reason = semantic_decision(filtered_question)
+    if parent_span:
+        parent_span.set_attribute("guardrail.semantic.action", action)
+    if action != "allow":
+        logger.warning(f"Semantic guard {action}: {semantic_reason}")
+        if parent_span:
+            parent_span.set_attribute("output.blocked", True)
+            parent_span.set_attribute("output.block_reason", f"semantic_guard_{action}")
+        if action == "clarify":
+            return QueryResponse(
+                answer=CLARIFY_MESSAGE,
+                blocked=True,
+                reason=f"Needs clarification. Reason: {semantic_reason}",
+            )
+        return QueryResponse(
+            answer="",
+            blocked=True,
+            reason=f"I cannot process this request. Reason: {semantic_reason}",
+        )
+
     # Step 4: Call LLM
     try:
         full_prompt = f"{SYSTEM_PROMPT}\n\nCustomer: {filtered_question}\n\nAssistant:"

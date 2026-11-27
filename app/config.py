@@ -15,6 +15,11 @@ APP_PORT = int(os.getenv("APP_PORT", "8000"))
 PHOENIX_ENDPOINT = os.getenv("PHOENIX_ENDPOINT", "http://localhost:6006")
 PHOENIX_ENABLED = os.getenv("PHOENIX_ENABLED", "false").lower() == "true"
 
+# Semantic guard: block when (attack similarity - safe similarity) is above this margin
+SEMANTIC_MARGIN = float(os.getenv("SEMANTIC_MARGIN", "0.0"))
+# Scores in (margin, margin + band] get a "please rephrase" reply instead of a hard block
+SEMANTIC_SOFT_BAND = float(os.getenv("SEMANTIC_SOFT_BAND", "0.05"))
+
 # System prompt for the customer service LLM
 SYSTEM_PROMPT = """You are a helpful customer service assistant for an e-commerce retail company. 
 You assist customers with:
